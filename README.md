@@ -39,9 +39,9 @@ FDPG-RDet/
 ├── configs/
 │   ├── yolov8s-fdpg-rdet-obb.yaml # Final model architecture
 │   └── greenhouse-obb.example.yaml
-├── fdpg/                           # Public Ultralytics integration
-├── fdpg_runtime/                   # Protected runnable FDPG modules
-├── pyarmor_runtime_000000/         # Windows/Linux runtime libraries
+├── fdpg/                           # Ultralytics integration
+├── fdpg_runtime/                   # FDPG runtime modules
+├── pyarmor_runtime_000000/         # Runtime libraries
 ├── scripts/
 │   ├── train.py
 │   ├── val.py
@@ -50,11 +50,9 @@ FDPG-RDet/
 └── requirements.txt
 ```
 
-Paper-figure generation, geographic analysis, manual-validation utilities, datasets, experiment runs, and model weights are intentionally excluded.
-
 ## Installation
 
-The protected research runtime currently supports **Python 3.11** on **Windows x86_64** and **Linux x86_64**.
+The current runtime supports **Python 3.11** on **Windows x86_64** and **Linux x86_64**.
 
 ```bash
 git clone https://github.com/RS-Hong/FDPG-RDet.git
@@ -142,40 +140,6 @@ python scripts/predict.py \
 ```
 
 Predicted oriented boxes and optional text labels are written to `runs/predict/`.
-
-## Loading FDPG-RDet in Python
-
-Always use `FDPGModel` instead of constructing `ultralytics.YOLO` directly. The wrapper registers the protected FDPG layers before the model YAML or checkpoint is loaded.
-
-```python
-from fdpg import FDPGModel
-
-model = FDPGModel("configs/yolov8s-fdpg-rdet-obb.yaml")
-model.train(data="configs/greenhouse-obb.yaml", imgsz=512, epochs=300)
-
-trained = FDPGModel("/path/to/best.pt")
-results = trained.predict("/path/to/images", imgsz=512, conf=0.40)
-```
-
-## Protected-module notice
-
-The executable implementations of FDR-Adapter and EPGI are distributed in obfuscated form to protect the unpublished method while preserving model construction, training, validation, and prediction. Obfuscation raises the cost of casual source inspection but should not be interpreted as cryptographic secrecy. The readable implementation can be released after the associated paper's publication.
-
-The current protected build was generated with the PyArmor 9.2.7 non-profit trial runtime and is intended for non-commercial academic evaluation. Replace it with a properly licensed build before any commercial distribution or use.
-
-Do not remove or rename `fdpg_runtime/` or `pyarmor_runtime_000000/`.
-
-## Citation
-
-If this repository contributes to your research, please cite the associated paper after its bibliographic information becomes available. A complete BibTeX entry will be added after publication.
-
-```bibtex
-@article{hong_fdpg_rdet,
-  title   = {Frequency-Dynamic and Position-Guided Rotated Detection for Multitemporal Object-Level Mapping of Plastic Greenhouses},
-  author  = {Hong, Ruikai and others},
-  note    = {Manuscript under review}
-}
-```
 
 ## Acknowledgements
 
