@@ -163,6 +163,8 @@ results = trained.predict("/path/to/images", imgsz=512, conf=0.40)
 
 The executable implementations of FDR-Adapter and EPGI are distributed in obfuscated form to protect the unpublished method while preserving model construction, training, validation, and prediction. Obfuscation raises the cost of casual source inspection but should not be interpreted as cryptographic secrecy. The readable implementation can be released after the associated paper's publication.
 
+The current protected build was generated with the PyArmor 9.2.7 non-profit trial runtime and is intended for non-commercial academic evaluation. Replace it with a properly licensed build before any commercial distribution or use.
+
 Do not remove or rename `fdpg_runtime/` or `pyarmor_runtime_000000/`.
 
 ## Citation
