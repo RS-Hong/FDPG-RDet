@@ -103,8 +103,6 @@ Copy `configs/greenhouse-obb.example.yaml` to `configs/greenhouse-obb.yaml` and 
 >
 > **Access code:** `[To be added, if required]`
 
-This reserved section can later be replaced with a Baidu Netdisk, Google Drive, Zenodo, or other archive link.
-
 ## Training
 
 The default options reproduce the main manuscript setup: 512 x 512 input, AdamW, 300 maximum epochs, early-stopping patience of 60, and random seed 42.
