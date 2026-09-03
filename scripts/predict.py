@@ -11,7 +11,7 @@ CONFIG_DIR = ROOT / ".ultralytics"
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("YOLO_CONFIG_DIR", str(CONFIG_DIR))
 
-from fdpg import FDPGModel  # noqa: E402
+from ultralytics import YOLO  # noqa: E402
 
 
 def main():
@@ -27,7 +27,7 @@ def main():
     parser.add_argument("--save-txt", action="store_true")
     args = parser.parse_args()
 
-    model = FDPGModel(args.weights)
+    model = YOLO(args.weights, task="obb")
     model.predict(
         source=args.source,
         imgsz=args.imgsz,

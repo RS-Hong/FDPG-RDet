@@ -7,6 +7,8 @@ FDPG-RDet is an oriented-object detector designed for the elongated geometry, de
 - **FDR-Adapter**: a Frequency-Dynamic Residual Adapter that strengthens direction-sensitive and periodic greenhouse features.
 - **EPGI**: an Edge-aware Positional Guidance Injection module that restores shallow boundary and positional cues for more accurate oriented-box localization.
 
+This repository contains the complete Ultralytics 8.3.221 source architecture used by the project, together with the FDPG-RDet integration and runnable training, validation, and prediction entry points.
+
 > **Release status:** training, validation, and prediction code is available. Model weights and the dataset are not stored in this repository.
 
 ## Architecture
@@ -37,9 +39,7 @@ Evaluation on the plastic-greenhouse OBB dataset used in the manuscript produced
 FDPG-RDet/
 ├── assets/                         # Selected manuscript figures
 ├── configs/
-│   ├── yolov8s-fdpg-rdet-obb.yaml # Final model architecture
-│   └── greenhouse-obb.example.yaml
-├── fdpg/                           # Ultralytics integration
+│   └── greenhouse-obb.example.yaml # Dataset configuration template
 ├── fdpg_runtime/                   # FDPG runtime modules
 ├── pyarmor_runtime_000000/         # Runtime libraries
 ├── scripts/
@@ -47,7 +47,15 @@ FDPG-RDet/
 │   ├── val.py
 │   ├── predict.py
 │   └── smoke_test.py
-└── requirements.txt
+├── ultralytics/                    # Complete Ultralytics source package
+│   ├── cfg/models/v8/
+│   │   └── yolov8s-fdpg-rdet-obb.yaml
+│   ├── engine/
+│   ├── models/
+│   ├── nn/
+│   └── utils/
+├── pyproject.toml
+└── LICENSE
 ```
 
 ## Installation
@@ -60,7 +68,7 @@ cd FDPG-RDet
 
 conda create -n fdpg-rdet python=3.11 -y
 conda activate fdpg-rdet
-pip install -r requirements.txt
+pip install -e .
 ```
 
 Verify the installation:
@@ -69,7 +77,7 @@ Verify the installation:
 python scripts/smoke_test.py
 ```
 
-The repository is pinned to `ultralytics==8.3.221` because the model-registration interface is version-sensitive.
+The included source tree is based on Ultralytics 8.3.221.
 
 ## Dataset
 

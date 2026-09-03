@@ -12,11 +12,11 @@ CONFIG_DIR = ROOT / ".ultralytics"
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("YOLO_CONFIG_DIR", str(CONFIG_DIR))
 
-from fdpg import FDPGModel  # noqa: E402
+from ultralytics import YOLO  # noqa: E402
 
 
 def main():
-    model = FDPGModel(ROOT / "configs/yolov8s-fdpg-rdet-obb.yaml").model
+    model = YOLO(ROOT / "ultralytics/cfg/models/v8/yolov8s-fdpg-rdet-obb.yaml", task="obb").model
     model.train()
     outputs = model(torch.randn(2, 3, 128, 128))
     tensors = []

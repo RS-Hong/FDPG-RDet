@@ -11,13 +11,15 @@ CONFIG_DIR = ROOT / ".ultralytics"
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("YOLO_CONFIG_DIR", str(CONFIG_DIR))
 
-from fdpg import FDPGModel  # noqa: E402
+from ultralytics import YOLO  # noqa: E402
+
+DEFAULT_MODEL = ROOT / "ultralytics/cfg/models/v8/yolov8s-fdpg-rdet-obb.yaml"
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data", required=True, help="Dataset YAML path")
-    parser.add_argument("--model", default=str(ROOT / "configs/yolov8s-fdpg-rdet-obb.yaml"))
+    parser.add_argument("--model", default=str(DEFAULT_MODEL))
     parser.add_argument("--epochs", type=int, default=300)
     parser.add_argument("--batch", type=int, default=32)
     parser.add_argument("--imgsz", type=int, default=512)
@@ -30,7 +32,7 @@ def parse_args():
 
 def main():
     args = parse_args()
-    model = FDPGModel(args.model)
+    model = YOLO(args.model, task="obb")
     model.train(
         data=args.data,
         epochs=args.epochs,

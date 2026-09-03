@@ -11,7 +11,7 @@ CONFIG_DIR = ROOT / ".ultralytics"
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("YOLO_CONFIG_DIR", str(CONFIG_DIR))
 
-from fdpg import FDPGModel  # noqa: E402
+from ultralytics import YOLO  # noqa: E402
 
 
 def main():
@@ -24,7 +24,7 @@ def main():
     parser.add_argument("--split", choices=("val", "test"), default="test")
     args = parser.parse_args()
 
-    model = FDPGModel(args.weights)
+    model = YOLO(args.weights, task="obb")
     metrics = model.val(
         data=args.data,
         imgsz=args.imgsz,
