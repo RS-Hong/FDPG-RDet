@@ -7,7 +7,7 @@ FDPG-RDet is an oriented-object detector designed for the elongated geometry, de
 - **FDR-Adapter**: a Frequency-Dynamic Residual Adapter that strengthens direction-sensitive and periodic greenhouse features.
 - **EPGI**: an Edge-aware Positional Guidance Injection module that restores shallow boundary and positional cues for more accurate oriented-box localization.
 
-This repository contains the complete Ultralytics 8.3.221 source architecture used by the project, together with the FDPG-RDet integration and runnable training, validation, and prediction entry points.
+This repository preserves the complete project-local Ultralytics 8.3.221 source tree, including the original framework code, experimental modules, and ablation model configurations, together with the FDPG-RDet integration and runnable training, validation, and prediction entry points.
 
 > **Release status:** training, validation, and prediction code is available. Model weights and the dataset are not stored in this repository.
 
@@ -49,7 +49,8 @@ FDPG-RDet/
 │   └── smoke_test.py
 ├── ultralytics/                    # Complete Ultralytics source package
 │   ├── cfg/models/v8/
-│   │   └── yolov8s-fdpg-rdet-obb.yaml
+│   │   ├── yolov8s-fdpg-rdet-obb.yaml
+│   │   └── yolov8-obb-*.yaml        # Original and ablation configurations
 │   ├── engine/
 │   ├── models/
 │   ├── nn/

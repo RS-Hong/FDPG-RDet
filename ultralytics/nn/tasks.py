@@ -13,6 +13,8 @@ import torch.nn as nn
 from ultralytics.nn.autobackend import check_class_names
 from ultralytics.nn.modules import (
     AIFI,
+    AdaptiveConcat2,
+    AdaptiveConcat3,
     C1,
     C2,
     C2PSA,
@@ -21,6 +23,7 @@ from ultralytics.nn.modules import (
     ELAN1,
     OBB,
     PSA,
+    PolyKernelResidual,
     SPP,
     SPPELAN,
     SPPF,
@@ -30,6 +33,8 @@ from ultralytics.nn.modules import (
     Bottleneck,
     BottleneckCSP,
     C2f,
+    C2f_FDConv,
+    C2f_FDConvLite,
     C2fAttn,
     C2fCIB,
     C2fPSA,
@@ -38,6 +43,7 @@ from ultralytics.nn.modules import (
     C3x,
     CBFuse,
     CBLinear,
+    CAAResidual,
     Classify,
     Concat,
     Conv,
@@ -47,13 +53,15 @@ from ultralytics.nn.modules import (
     DWConv,
     DWConvTranspose2d,
     Focus,
-    FDCResidual,
     GhostBottleneck,
     GhostConv,
+    FDCResidual,
     HGBlock,
     HGStem,
     ImagePoolingAttn,
     Index,
+    LSKAttentionResidual,
+    LSKResidual,
     LRPCHead,
     Pose,
     RepC3,
@@ -65,11 +73,19 @@ from ultralytics.nn.modules import (
     SCDown,
     Segment,
     ShallowPositionInject,
+    SpatialGateResidual,
     TorchVision,
+    WeightedConcat2,
+    WeightedConcat3,
     WorldDetect,
     YOLOEDetect,
     YOLOESegment,
     v10Detect,
+    LFDCBlock,
+    C2f_LFDC,
+    ESSamp,
+    EUCB,
+    Converse2D,
 )
 from ultralytics.utils import DEFAULT_CFG_DICT, LOGGER, YAML, colorstr, emojis
 from ultralytics.utils.checks import check_requirements, check_suffix, check_yaml
@@ -1594,7 +1610,14 @@ def parse_model(d, ch, verbose=True):
             C1,
             C2,
             C2f,
+            C2f_FDConv,
+            C2f_FDConvLite,
+            CAAResidual,
             FDCResidual,
+            LSKAttentionResidual,
+            LSKResidual,
+            PolyKernelResidual,
+            SpatialGateResidual,
             C3k2,
             RepNCSPELAN4,
             ELAN1,
@@ -1613,6 +1636,11 @@ def parse_model(d, ch, verbose=True):
             SCDown,
             C2fCIB,
             A2C2f,
+            C2f_LFDC,
+            LFDCBlock,
+            ESSamp,
+            EUCB,
+            Converse2D,
         }
     )
     repeat_modules = frozenset(  # modules with 'repeat' arguments
@@ -1621,6 +1649,8 @@ def parse_model(d, ch, verbose=True):
             C1,
             C2,
             C2f,
+            C2f_FDConv,
+            C2f_FDConvLite,
             C3k2,
             C2fAttn,
             C3,
@@ -1681,7 +1711,7 @@ def parse_model(d, ch, verbose=True):
             c2 = args[1] if args[3] else args[1] * 4
         elif m is torch.nn.BatchNorm2d:
             args = [ch[f]]
-        elif m is Concat:
+        elif m in frozenset({Concat, AdaptiveConcat2, AdaptiveConcat3, WeightedConcat2, WeightedConcat3}):
             c2 = sum(ch[x] for x in f)
         elif m is ShallowPositionInject:
             c2 = ch[f[0]]

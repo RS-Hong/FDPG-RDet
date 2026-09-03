@@ -10,6 +10,8 @@ import torch.nn.functional as F
 from ultralytics.utils.torch_utils import fuse_conv_and_bn
 
 from .conv import Conv, DWConv, GhostConv, LightConv, RepConv, autopad
+from .fdconv import FDConv
+# from .EUCB import EUCB
 from .transformer import TransformerBlock
 
 __all__ = (
@@ -32,6 +34,8 @@ __all__ = (
     "Bottleneck",
     "BottleneckCSP",
     "C2f",
+    "C2f_FDConv",
+    "C2f_FDConvLite",
     "C2fAttn",
     "C2fCIB",
     "C2fPSA",
@@ -46,6 +50,15 @@ __all__ = (
     "HGStem",
     "ImagePoolingAttn",
     "Proto",
+    "FDBottleneck",
+    "FDCConv",
+    "FDCResidual",
+    "CAAResidual",
+    "LSKAttentionResidual",
+    "LSKResidual",
+    "PolyKernelResidual",
+    "ShallowPositionInject",
+    "SpatialGateResidual",
     "RepC3",
     "RepNCSPELAN4",
     "RepVGGDW",
@@ -326,6 +339,225 @@ class C2f(nn.Module):
         return self.cv2(torch.cat(y, 1))
 
 
+class SpatialGateResidual(nn.Module):
+    """Zero-initialized spatial gate residual for lightweight detection-feature refinement."""
+
+    def __init__(self, c1: int, c2: int, kernel_size: int = 7):
+        super().__init__()
+        assert kernel_size in {3, 7}, "kernel_size must be 3 or 7"
+        padding = 3 if kernel_size == 7 else 1
+        self.proj = Conv(c1, c2, 1, 1, act=False) if c1 != c2 else nn.Identity()
+        self.gate = nn.Conv2d(2, 1, kernel_size, padding=padding, bias=True)
+        self.gamma = nn.Parameter(torch.zeros(1))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        y = self.proj(x)
+        pooled = torch.cat((y.mean(1, keepdim=True), y.amax(1, keepdim=True)), 1)
+        gate = torch.sigmoid(self.gate(pooled)).mul(2.0).sub(1.0)
+        return y + self.gamma.to(dtype=y.dtype, device=y.device) * y * gate
+
+
+class LSKBlockOriginal(nn.Module):
+    """Original LSKNet spatial gating unit with selective large kernels."""
+
+    def __init__(self, c: int):
+        super().__init__()
+        self.conv0 = nn.Conv2d(c, c, 5, padding=2, groups=c)
+        self.conv_spatial = nn.Conv2d(c, c, 7, stride=1, padding=9, groups=c, dilation=3)
+        self.conv1 = nn.Conv2d(c, c // 2, 1)
+        self.conv2 = nn.Conv2d(c, c // 2, 1)
+        self.conv_squeeze = nn.Conv2d(2, 2, 7, padding=3)
+        self.conv = nn.Conv2d(c // 2, c, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        attn1 = self.conv0(x)
+        attn2 = self.conv_spatial(attn1)
+        attn1 = self.conv1(attn1)
+        attn2 = self.conv2(attn2)
+        attn = torch.cat((attn1, attn2), dim=1)
+        avg_attn = attn.mean(dim=1, keepdim=True)
+        max_attn = attn.amax(dim=1, keepdim=True)
+        sig = self.conv_squeeze(torch.cat((avg_attn, max_attn), dim=1)).sigmoid()
+        attn = attn1 * sig[:, 0:1] + attn2 * sig[:, 1:2]
+        return x * self.conv(attn)
+
+
+class LSKAttentionResidual(nn.Module):
+    """LSKNet-style attention residual adapted for YOLO backbone stages."""
+
+    def __init__(self, c1: int, c2: int, init_value: float = 1e-2):
+        super().__init__()
+        self.proj = Conv(c1, c2, 1, 1, act=False) if c1 != c2 else nn.Identity()
+        self.norm = nn.BatchNorm2d(c2)
+        self.proj_1 = nn.Conv2d(c2, c2, 1)
+        self.act = nn.GELU()
+        self.spatial_gating_unit = LSKBlockOriginal(c2)
+        self.proj_2 = nn.Conv2d(c2, c2, 1)
+        self.gamma = nn.Parameter(init_value * torch.ones(c2))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        y = self.proj(x)
+        z = self.norm(y)
+        z = self.proj_1(z)
+        z = self.act(z)
+        z = self.spatial_gating_unit(z)
+        z = self.proj_2(z)
+        gamma = self.gamma.to(dtype=y.dtype, device=y.device).view(1, -1, 1, 1)
+        return y + gamma * z
+
+
+class LSKResidual(nn.Module):
+    """Zero-initialized Large Selective Kernel residual adapter for remote-sensing detection features."""
+
+    def __init__(self, c1: int, c2: int, k: int = 7):
+        super().__init__()
+        assert k in {5, 7}, "k must be 5 or 7"
+        self.proj = Conv(c1, c2, 1, 1, act=False) if c1 != c2 else nn.Identity()
+        c_ = max(8, c2 // 2)
+        self.dw5 = nn.Conv2d(c2, c2, 5, padding=2, groups=c2, bias=False)
+        self.dw_large = nn.Conv2d(c2, c2, k, padding=(k // 2) * 3, dilation=3, groups=c2, bias=False)
+        self.reduce5 = nn.Conv2d(c2, c_, 1, bias=False)
+        self.reduce_large = nn.Conv2d(c2, c_, 1, bias=False)
+        self.select = nn.Conv2d(2, 2, 7, padding=3, bias=True)
+        self.expand = nn.Conv2d(c_, c2, 1, bias=False)
+        self.bn = nn.BatchNorm2d(c2)
+        self.act = nn.SiLU()
+        self.gamma = nn.Parameter(torch.zeros(1))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        y = self.proj(x)
+        local = self.reduce5(self.dw5(y))
+        context = self.reduce_large(self.dw_large(y))
+        feats = torch.cat((local, context), dim=1)
+        avg = feats.mean(dim=1, keepdim=True)
+        mx = feats.amax(dim=1, keepdim=True)
+        weights = torch.sigmoid(self.select(torch.cat((avg, mx), dim=1)))
+        selected = local * weights[:, 0:1] + context * weights[:, 1:2]
+        out = self.act(self.bn(self.expand(selected)))
+        return y + self.gamma.to(dtype=y.dtype, device=y.device) * out
+
+
+class CAAResidual(nn.Module):
+    """Zero-initialized Context Anchor Attention residual for elongated remote-sensing targets."""
+
+    def __init__(self, c1: int, c2: int, h_kernel: int = 11, v_kernel: int = 11):
+        super().__init__()
+        self.proj = Conv(c1, c2, 1, 1, act=False) if c1 != c2 else nn.Identity()
+        c_ = max(8, c2 // 4)
+        self.avg_pool = nn.AvgPool2d(7, stride=1, padding=3)
+        self.conv1 = Conv(c2, c_, 1, 1)
+        self.h_conv = nn.Conv2d(c_, c_, (1, h_kernel), padding=(0, h_kernel // 2), groups=c_, bias=False)
+        self.v_conv = nn.Conv2d(c_, c_, (v_kernel, 1), padding=(v_kernel // 2, 0), groups=c_, bias=False)
+        self.conv2 = nn.Conv2d(c_, c2, 1, bias=True)
+        self.gamma = nn.Parameter(torch.zeros(1))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        y = self.proj(x)
+        attn = self.avg_pool(y)
+        attn = self.conv1(attn)
+        attn = self.h_conv(attn)
+        attn = self.v_conv(attn)
+        attn = torch.sigmoid(self.conv2(attn)).mul(2.0).sub(1.0)
+        return y + self.gamma.to(dtype=y.dtype, device=y.device) * y * attn
+
+
+class PolyKernelResidual(nn.Module):
+    """Zero-initialized mixed square/strip kernel residual for greenhouse-like elongated objects."""
+
+    def __init__(self, c1: int, c2: int, strip_kernel: int = 9, e: float = 0.25):
+        super().__init__()
+        assert strip_kernel % 2 == 1, "strip_kernel must be odd"
+        self.proj = Conv(c1, c2, 1, 1, act=False) if c1 != c2 else nn.Identity()
+        c_ = max(16, int(c2 * e))
+        self.reduce = Conv(c2, c_, 1, 1)
+        self.local3 = nn.Conv2d(c_, c_, 3, padding=1, groups=c_, bias=False)
+        self.local5 = nn.Conv2d(c_, c_, 5, padding=2, groups=c_, bias=False)
+        self.strip = nn.Sequential(
+            nn.Conv2d(c_, c_, (1, strip_kernel), padding=(0, strip_kernel // 2), groups=c_, bias=False),
+            nn.Conv2d(c_, c_, (strip_kernel, 1), padding=(strip_kernel // 2, 0), groups=c_, bias=False),
+        )
+        self.fuse = nn.Sequential(
+            nn.Conv2d(c_ * 3, c2, 1, bias=False),
+            nn.BatchNorm2d(c2),
+            nn.SiLU(),
+        )
+        self.gamma = nn.Parameter(torch.zeros(1))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        y = self.proj(x)
+        z = self.reduce(y)
+        out = self.fuse(torch.cat((self.local3(z), self.local5(z), self.strip(z)), dim=1))
+        return y + self.gamma.to(dtype=y.dtype, device=y.device) * out
+
+
+class FDBottleneck(nn.Module):
+    """Standard YOLO bottleneck with FDConv in the second convolution only."""
+
+    def __init__(
+        self,
+        c1: int,
+        c2: int,
+        shortcut: bool = True,
+        g: int = 1,
+        k: tuple[int, int] = (3, 3),
+        e: float = 0.5,
+        mode: str = "full",
+    ):
+        """Initialize the FDC bottleneck."""
+        super().__init__()
+        c_ = int(c2 * e)
+        self.cv1 = Conv(c1, c_, k[0], 1)
+        self.cv2 = FDCConv(c_, c2, k[1], 1, g=g, mode=mode)
+        self.add = shortcut and c1 == c2
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply bottleneck with optional shortcut connection."""
+        return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
+
+
+class C2f_FDConv(nn.Module):
+    """C2f block with isolated FDConv bottlenecks for ablation-friendly FDC experiments."""
+
+    def __init__(
+        self,
+        c1: int,
+        c2: int,
+        n: int = 1,
+        shortcut: bool = False,
+        g: int = 1,
+        e: float = 0.5,
+        mode: str = "full",
+    ):
+        """Initialize C2f_FDConv."""
+        super().__init__()
+        self.c = int(c2 * e)
+        self.cv1 = Conv(c1, 2 * self.c, 1, 1)
+        self.cv2 = Conv((2 + n) * self.c, c2, 1)
+        self.m = nn.ModuleList(
+            FDBottleneck(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0, mode=mode) for _ in range(n)
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through C2f_FDConv."""
+        y = list(self.cv1(x).chunk(2, 1))
+        y.extend(m(y[-1]) for m in self.m)
+        return self.cv2(torch.cat(y, 1))
+
+    def forward_split(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass using split() instead of chunk()."""
+        y = self.cv1(x).split((self.c, self.c), 1)
+        y = [y[0], y[1]]
+        y.extend(m(y[-1]) for m in self.m)
+        return self.cv2(torch.cat(y, 1))
+
+
+class C2f_FDConvLite(C2f_FDConv):
+    """Lite FDC-C2f with fewer dynamic kernels and no local KSM/FBM by default."""
+
+    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = False, g: int = 1, e: float = 0.5):
+        super().__init__(c1, c2, n=n, shortcut=shortcut, g=g, e=e, mode="lite")
+
+
 class C3(nn.Module):
     """CSP Bottleneck with 3 convolutions."""
 
@@ -467,6 +699,35 @@ class GhostBottleneck(nn.Module):
         return self.conv(x) + self.shortcut(x)
 
 
+# class Bottleneck(nn.Module):
+#     """Standard bottleneck."""
+#
+#     def __init__(
+#         self, c1: int, c2: int, shortcut: bool = True, g: int = 1, k: tuple[int, int] = (3, 3), e: float = 0.5
+#     ):
+#         """
+#         Initialize a standard bottleneck module.
+#
+#         Args:
+#             c1 (int): Input channels.
+#             c2 (int): Output channels.
+#             shortcut (bool): Whether to use shortcut connection.
+#             g (int): Groups for convolutions.
+#             k (tuple): Kernel sizes for convolutions.
+#             e (float): Expansion ratio.
+#         """
+#         super().__init__()
+#         c_ = int(c2 * e)  # hidden channels
+#         self.cv1 = Conv(c1, c_, k[0], 1)
+#         self.cv2 = Conv(c_, c2, k[1], 1, g=g)
+#         self.add = shortcut and c1 == c2
+#
+#     def forward(self, x: torch.Tensor) -> torch.Tensor:
+#         """Apply bottleneck with optional shortcut connection."""
+#         return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
+
+
+# new
 class Bottleneck(nn.Module):
     """Standard bottleneck."""
 
@@ -493,6 +754,158 @@ class Bottleneck(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply bottleneck with optional shortcut connection."""
         return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
+
+# -------------------------------------------------------------FDC Block------------------------------------------------------#
+# Depthwise Separable Convolution (dw_pw)
+def conv_dw_pw(in_ch, out_ch, kernel_size=3, padding=None, dilation=1):
+    if padding is None:
+        padding = dilation * (kernel_size // 2)
+    return nn.Sequential(
+        nn.Conv2d(in_ch, in_ch, kernel_size, padding=padding, dilation=dilation,
+                  groups=in_ch, bias=False),
+        nn.BatchNorm2d(in_ch),
+        nn.ReLU(inplace=True),
+        nn.Conv2d(in_ch, out_ch, 1, bias=False),
+        nn.BatchNorm2d(out_ch),
+        nn.ReLU(inplace=True),
+    )
+
+class SobelMagnitude(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        kx = torch.tensor([[-1.,0.,1.],[-2.,0.,2.],[-1.,0.,1.]]).view(1,1,3,3)
+        ky = torch.tensor([[-1.,-2.,-1.],[0.,0.,0.],[1.,2.,1.]]).view(1,1,3,3)
+        self.register_buffer('kx', kx.repeat(channels,1,1,1))
+        self.register_buffer('ky', ky.repeat(channels,1,1,1))
+    def forward(self, x):
+        C = x.shape[1]
+        gx = F.conv2d(x, self.kx[:C], padding=1, groups=C)
+        gy = F.conv2d(x, self.ky[:C], padding=1, groups=C)
+        return torch.sqrt(gx * gx + gy * gy + 1e-6)
+
+class LFDCBlock(nn.Module):
+    def __init__(self, ratio=0.25):
+        super().__init__()
+        self.ratio = ratio
+        self._built = False
+        self.gamma = nn.Parameter(torch.tensor(0.0))
+        self.lsm = nn.Sequential(
+            nn.Conv2d(1, 8, 3, padding=1, bias=False),
+            nn.BatchNorm2d(8),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(8, 3, 1, bias=True)
+        )
+
+    def _build(self, C, device, dtype):
+        # 计算处理/旁路通道，保证有旁路
+        c_proc = max(1, int(round(C * self.ratio)))
+        if C > 1:
+            c_proc = min(C - 1, c_proc)
+        c_byp = C - c_proc
+        self.split_sizes = (c_byp, c_proc)
+
+        # 自适应分支分配：避免 zero-sum/超和
+        if c_proc >= 3:
+            p1 = max(1, int(round(c_proc * 0.25)))
+            p2 = max(1, int(round(c_proc * 0.50)))
+            p3 = c_proc - p1 - p2
+            if p3 < 1:
+                need = 1 - p3
+                take = min(need, max(0, p2 - 1)); p2 -= take; need -= take
+                if need > 0:
+                    take = min(need, max(0, p1 - 1)); p1 -= take; need -= take
+                p3 = 1
+        elif c_proc == 2:
+            p1, p2, p3 = 1, 1, 0
+        else:  # c_proc == 1
+            p1, p2, p3 = 1, 0, 0
+        self.f_sizes = (p1, p2, p3)
+
+        # 仅为正尺寸的分支创建卷积，0 尺寸用 Identity 占位但 forward 里会跳过
+        self.f1 = conv_dw_pw(p1, p1, kernel_size=1, padding=0).to(device, dtype) if p1 > 0 else nn.Identity()
+        self.f2 = conv_dw_pw(p2, p2, kernel_size=3, dilation=1).to(device, dtype) if p2 > 0 else nn.Identity()
+        self.f3 = conv_dw_pw(p3, p3, kernel_size=3, dilation=2).to(device, dtype) if p3 > 0 else nn.Identity()
+
+        self.merge  = nn.Conv2d(c_proc, c_proc, 1, bias=False).to(device, dtype)
+        self.mix    = nn.Conv2d(C, C, 1, bias=False).to(device, dtype)
+        self.refine = nn.Sequential(nn.BatchNorm2d(C), nn.ReLU(inplace=True)).to(device, dtype)
+
+        self.sobel  = SobelMagnitude(C).to(device, dtype)
+
+        r = max(8, C // 16)
+        self.se = nn.Sequential(
+            nn.Linear(C, C // r, bias=False),
+            nn.ReLU(True),
+            nn.Linear(C // r, C, bias=False),
+            nn.Sigmoid()
+        ).to(device, dtype)
+
+        self._built = True
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+        if not self._built:
+            self._build(C, x.device, x.dtype)
+
+        c_byp, c_proc = self.split_sizes
+        xb, xp = torch.split(x, [c_byp, c_proc], 1)
+
+        p1, p2, p3 = self.f_sizes
+        sizes = [s for s in (p1, p2, p3) if s > 0]        # 只对正尺寸 split
+        parts = list(torch.split(xp, sizes, 1)) if sizes else []
+        outs = []
+        beta = None
+
+        # 仅为有效分支计算权重
+        if c_proc > 0:
+            G = self.sobel(x).mean(1, keepdim=True)
+            D = F.relu(G - F.avg_pool2d(G, 7, 1, 3))
+            beta = F.softmax(self.lsm(D), dim=1)  # B×3×H×W
+
+        # 依次处理有效分支（按 f1,f2,f3 顺序映射 beta 的 0/1/2）
+        idx = 0
+        if p1 > 0:
+            o1 = self.f1(parts[idx]) * beta[:, 0:1]; outs.append(o1); idx += 1
+        if p2 > 0:
+            o2 = self.f2(parts[idx]) * beta[:, 1:2]; outs.append(o2); idx += 1
+        if p3 > 0:
+            o3 = self.f3(parts[idx]) * beta[:, 2:3]; outs.append(o3); idx += 1
+
+        y = outs[0] if len(outs) == 1 else torch.cat(outs, 1)  # 通道数 = c_proc
+        y = self.merge(y)
+
+        y = torch.cat([xb, y], 1)  # 还原到 C
+        y = self.mix(y)
+        y = self.refine(y)
+
+        s = (y * y).mean((2, 3))
+        y = y * self.se(s).view(B, C, 1, 1)
+
+        return x + self.gamma * y
+
+# C2f + LFDC（先用“后处理”版本，最稳）
+class C2f_LFDC(nn.Module):
+    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5, ratio=0.25):
+        # 一定要放在最前面！！
+        super().__init__()
+
+        # 防御性清洗，避免 YAML 把 n/e/shortcut 传成 tuple/list/bool 导致后面算通道或重复数异常
+        if isinstance(n, (list, tuple, bool)):   n = int(n)
+        if isinstance(shortcut, (list, tuple)):  shortcut = bool(shortcut[0])
+        if isinstance(e, (list, tuple)):         e = float(e[0])
+
+        # 原 C2f 主干
+        self.c2f = C2f(c1, c2, n=n, shortcut=shortcut, g=g, e=e)
+
+        # 频域引导块（ratio 用默认；你不想在 YAML 里显式写它）
+        self.lfdc = LFDCBlock(ratio=ratio)
+
+    def forward(self, x):
+        y = self.c2f(x)
+        y = self.lfdc(y)
+        return y
+# -------------------------------------------------------------FDC Block------------------------------------------------------#
+
 
 
 class BottleneckCSP(nn.Module):

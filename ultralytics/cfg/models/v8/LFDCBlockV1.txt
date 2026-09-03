@@ -1,0 +1,186 @@
+def conv_bn_relu(in_ch, out_ch, k=3, padding=1, dilation=1):
+    return nn.Sequential(
+        nn.Conv2d(in_ch, out_ch, k, padding=padding, dilation=dilation, bias=False),
+        nn.BatchNorm2d(out_ch),
+        nn.ReLU(inplace=True)
+    )
+
+class SobelMagnitude(nn.Module):
+    """Per-channel gradient magnitude via group conv Sobel kernels (fast, no params)."""
+    def __init__(self, channels):
+        super().__init__()
+        self.channels = channels
+        kx = torch.tensor([[-1.,0.,1.],[-2.,0.,2.],[-1.,0.,1.]], dtype=torch.float32).view(1,1,3,3)
+        ky = torch.tensor([[-1.,-2.,-1.],[0.,0.,0.],[1.,2.,1.]], dtype=torch.float32).view(1,1,3,3)
+        # repeat per channel
+        self.register_buffer('kx', kx.repeat(channels,1,1,1))
+        self.register_buffer('ky', ky.repeat(channels,1,1,1))
+
+    def forward(self, x):
+        # x: (B,C,H,W)
+        C = x.shape[1]
+        # conv with groups=C so each channel uses same sobel kernel
+        gx = F.conv2d(x, self.kx, padding=1, groups=C)
+        gy = F.conv2d(x, self.ky, padding=1, groups=C)
+        mag = torch.sqrt(gx * gx + gy * gy + 1e-6)
+        return mag  # (B,C,H,W)
+
+# ---- LFDCBlockV2
+class LFDCBlock(nn.Module):
+    """
+    LFDCBlockV2 - lightweight, channel-preserving local spectral modulation block.
+    - Accepts *args/**kwargs for Ultralytics YAML compatibility.
+    - Lazy build on first forward (build internals according to actual input channels).
+    - Multi-scale band extraction via channel-split convolutions (1x1,3x3,5x5).
+    - LSM: local contrast D = ReLU(G - AvgPool(G)) drives pixel-wise band weights beta.
+    - FBM: fused output refined and channel-reweighted by a small SE-like module.
+    - Residual add with learnable scale gamma.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        # keep user args if any (not required)
+        self._user_args = args
+        self._user_kwargs = kwargs
+
+        # lazy init placeholders
+        self._built = False
+        self.gamma = nn.Parameter(torch.tensor(0.1))  # residual scaling
+
+        # small net to convert G -> 3 band logits (pixel-wise)
+        self.lsm_net = nn.Sequential(
+            nn.Conv2d(1, 16, 3, padding=1, bias=False),
+            nn.BatchNorm2d(16),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(16, 3, 1)  # logits for 3 bands
+        )
+
+        # SE-like MLP placeholders (built lazily)
+        self.se_mlp = None
+
+    def _build(self, C):
+        """
+        Build internal layers for channel count C. Preserve channels: inputs->outputs both C.
+        Strategy:
+          - split input into three channel groups (c1,c2,c3) roughly [C//4, C//2, rest]
+          - process each group with a conv kernel suited to frequency:
+              1x1 -> low-frequency proxy
+              3x3 -> mid-frequency proxy
+              5x5 (or dilated 3x3) -> high-frequency proxy
+          - concat them back and mix via 1x1 conv to restore C channels.
+        """
+        self.C = C
+        # channel split sizes (ensure at least 1 channel per group)
+        c1 = max(1, C // 4)
+        c2 = max(1, C // 2)
+        c3 = max(1, C - c1 - c2)
+        self._split_sizes = (c1, c2, c3)
+
+        # per-group convs (input and output sizes are group sizes to preserve)
+        self.conv1 = conv_bn_relu(c1, c1, k=1, padding=0)   # low-freq proxy (1x1)
+        self.conv2 = conv_bn_relu(c2, c2, k=3, padding=1)   # mid-freq (3x3)
+        # high freq: larger effective receptive field: use 3x3 dilated or 5x5
+        # choose dilated 3x3 to reduce params
+        self.conv3 = conv_bn_relu(c3, c3, k=3, padding=2, dilation=2)
+
+        # mixing conv to merge concatenated groups back to C channels
+        self.mix_conv = nn.Sequential(
+            nn.Conv2d(c1 + c2 + c3, C, 1, bias=False),
+            nn.BatchNorm2d(C),
+            nn.ReLU(inplace=True)
+        )
+
+        # sobel magnitude on full channels
+        self.sobel = SobelMagnitude(C)
+
+        # small refine conv after fusion
+        self.refine = nn.Sequential(
+            nn.Conv2d(C, C, 1, bias=False),
+            nn.BatchNorm2d(C),
+            nn.ReLU(inplace=True)
+        )
+
+        # SE-like MLP for channel reweighting (C -> C//r -> C)
+        r = max(4, C // 8)
+        self.se_mlp = nn.Sequential(
+            nn.Linear(C, C // r, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(C // r, C, bias=False),
+            nn.Sigmoid()
+        )
+
+        self._built = True
+
+    def forward(self, x):
+        """
+        x: (B, C, H, W)
+        returns: (B, C, H, W)
+        """
+        B, C, H, W = x.shape
+        if not self._built:
+            self._build(C)
+            # ensure newly created params on same device
+            self.to(x.device)
+
+        # ---- multi-scale band extraction via channel-split
+        c1, c2, c3 = self._split_sizes
+        # split along channel dim
+        xs = torch.split(x, [c1, c2, c3], dim=1)  # list of tensors (B,c1,H,W), ...
+        # apply per-group convs
+        y1 = self.conv1(xs[0])  # low-freq
+        y2 = self.conv2(xs[1])  # mid-freq
+        y3 = self.conv3(xs[2])  # high-freq
+        # concat and mix -> shape (B, C, H, W)
+        mixed = torch.cat([y1, y2, y3], dim=1)
+        mixed = self.mix_conv(mixed)
+
+        # ---- LSM: compute local gradient magnitude G and contrast D
+        mag = self.sobel(x)            # (B,C,H,W)
+        G = mag.mean(dim=1, keepdim=True)  # (B,1,H,W), per-pixel highfreq energy
+        # local background estimate by avg pooling (big kernel for neighborhood)
+        G_bg = F.avg_pool2d(G, kernel_size=7, stride=1, padding=3)  # same size
+        D = F.relu(G - G_bg)  # contrast map emphasizing pixels higher than local background
+
+        # pixel-wise band weights beta (B,3,H,W)
+        beta_logits = self.lsm_net(D)
+        beta = F.softmax(beta_logits, dim=1)
+
+        # split mixed into three band tensors corresponding to previous groups (but after mixing we have C channels)
+        # to modulate consistently we instead recompute band outputs by re-projecting mixed to three band proxies
+        # compute band proxies by simple 1x1 projections (lightweight)
+        band_proj1 = nn.functional.softmax  # placeholder not used
+        # lightweight projections (create on the fly via conv1x1 to get three band tensors)
+        # To avoid re-creating modules each forward, do simple linear channel slices: re-split mixed similarly
+        # We'll re-split mixed to the same sizes as before
+        my = torch.split(mixed, [c1, c2, c3], dim=1)
+        F1 = my[0]
+        F2 = my[1]
+        F3 = my[2]
+
+        # Expand beta to channel dims and modulate
+        b1 = beta[:, 0:1, :, :].expand(-1, F1.size(1), -1, -1)
+        b2 = beta[:, 1:2, :, :].expand(-1, F2.size(1), -1, -1)
+        b3 = beta[:, 2:3, :, :].expand(-1, F3.size(1), -1, -1)
+
+        F1_t = F1 * b1
+        F2_t = F2 * b2
+        F3_t = F3 * b3
+
+        # re-concat to C channels
+        fused_band = torch.cat([F1_t, F2_t, F3_t], dim=1)
+        # mix and refine
+        fused = self.mix_conv(fused_band)  # (B,C,H,W)
+        fused = self.refine(fused)
+
+        # ---- FBM: compute per-band global energy (optional) and SE-style channel weighting
+        # compute simple channel energy s_c = mean over H,W of fused^2 per channel
+        s = (fused * fused).mean(dim=(2, 3))  # (B, C)
+        # SE MLP expects (B,C) -> produce (B,C) attention
+        se = self.se_mlp(s)  # (B, C), values in (0,1)
+        se = se.view(B, C, 1, 1)
+
+        # apply channel reweighting
+        fused = fused * se
+
+        # residual and output
+        out = x + self.gamma * fused
+        return out

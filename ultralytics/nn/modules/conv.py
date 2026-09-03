@@ -24,6 +24,10 @@ __all__ = (
     "LightConv",
     "RepConv",
     "SpatialAttention",
+    "AdaptiveConcat2",
+    "AdaptiveConcat3",
+    "WeightedConcat2",
+    "WeightedConcat3",
 )
 
 
@@ -681,6 +685,63 @@ class Concat(nn.Module):
             (torch.Tensor): Concatenated tensor.
         """
         return torch.cat(x, self.d)
+
+
+class _AdaptiveConcat(nn.Module):
+    """Identity-initialized learnable weighted concatenation."""
+
+    def __init__(self, n: int, dimension=1, eps=1e-4):
+        super().__init__()
+        self.d = dimension
+        self.eps = eps
+        self.logits = nn.Parameter(torch.zeros(n, dtype=torch.float32))
+
+    def forward(self, x: list[torch.Tensor]):
+        w = torch.nn.functional.softplus(self.logits)
+        w = w / w.mean().clamp_min(self.eps)
+        return torch.cat([xi * w[i].to(dtype=xi.dtype, device=xi.device) for i, xi in enumerate(x)], self.d)
+
+
+class AdaptiveConcat2(_AdaptiveConcat):
+    """Adaptive concat for two feature maps, initialized as plain Concat."""
+
+    def __init__(self, dimension=1):
+        super().__init__(2, dimension)
+
+
+class AdaptiveConcat3(_AdaptiveConcat):
+    """Adaptive concat for three feature maps, initialized as plain Concat."""
+
+    def __init__(self, dimension=1):
+        super().__init__(3, dimension)
+
+
+class _WeightedConcat(nn.Module):
+    """BiFPN-style learnable weighted concatenation with unchanged output channels."""
+
+    def __init__(self, n: int, dimension=1, eps=1e-4):
+        super().__init__()
+        self.d = dimension
+        self.eps = eps
+        self.w = nn.Parameter(torch.ones(n, dtype=torch.float32))
+
+    def forward(self, x: list[torch.Tensor]):
+        w = torch.softmax(self.w, dim=0)
+        return torch.cat([xi * w[i].to(dtype=xi.dtype, device=xi.device) for i, xi in enumerate(x)], self.d)
+
+
+class WeightedConcat2(_WeightedConcat):
+    """Weighted concat for two feature maps."""
+
+    def __init__(self, dimension=1):
+        super().__init__(2, dimension)
+
+
+class WeightedConcat3(_WeightedConcat):
+    """Weighted concat for three feature maps."""
+
+    def __init__(self, dimension=1):
+        super().__init__(3, dimension)
 
 
 class Index(nn.Module):

@@ -144,9 +144,10 @@ class BboxLoss(nn.Module):
 class RotatedBboxLoss(BboxLoss):
     """Criterion class for computing training losses for rotated bounding boxes."""
 
-    def __init__(self, reg_max: int):
+    def __init__(self, reg_max: int, use_ciou: bool = False):
         """Initialize the RotatedBboxLoss module with regularization maximum and DFL settings."""
         super().__init__(reg_max)
+        self.use_ciou = use_ciou
 
     def forward(
         self,
@@ -160,7 +161,7 @@ class RotatedBboxLoss(BboxLoss):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute IoU and DFL losses for rotated bounding boxes."""
         weight = target_scores.sum(-1)[fg_mask].unsqueeze(-1)
-        iou = probiou(pred_bboxes[fg_mask], target_bboxes[fg_mask])
+        iou = probiou(pred_bboxes[fg_mask], target_bboxes[fg_mask], CIoU=self.use_ciou)
         loss_iou = ((1.0 - iou) * weight).sum() / target_scores_sum
 
         # DFL loss
@@ -666,7 +667,10 @@ class v8OBBLoss(v8DetectionLoss):
         """Initialize v8OBBLoss with model, assigner, and rotated bbox loss; model must be de-paralleled."""
         super().__init__(model)
         self.assigner = RotatedTaskAlignedAssigner(topk=10, num_classes=self.nc, alpha=0.5, beta=6.0)
-        self.bbox_loss = RotatedBboxLoss(self.reg_max).to(self.device)
+        self.bbox_loss = RotatedBboxLoss(self.reg_max, use_ciou=bool(getattr(self.hyp, "obb_ciou", False))).to(
+            self.device
+        )
+        self.angle_gain = float(getattr(self.hyp, "angle", 0.0))
 
     def preprocess(self, targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor) -> torch.Tensor:
         """Preprocess targets for oriented bounding box detection."""
@@ -748,6 +752,14 @@ class v8OBBLoss(v8DetectionLoss):
             loss[0], loss[2] = self.bbox_loss(
                 pred_distri, pred_bboxes, anchor_points, target_bboxes, target_scores, target_scores_sum, fg_mask
             )
+            if self.angle_gain:
+                angle_delta = pred_bboxes[..., 4][fg_mask] - target_bboxes[..., 4][fg_mask]
+                angle_weight = target_scores.sum(-1)[fg_mask]
+                wh = target_bboxes[..., 2:4][fg_mask].clamp(min=1e-6)
+                elongation = (wh.max(dim=-1).values / wh.min(dim=-1).values).clamp(max=20.0)
+                elongation_weight = ((elongation - 1.0) / (elongation + 1.0)).detach()
+                loss_angle = ((1.0 - torch.cos(2.0 * angle_delta)) * elongation_weight * angle_weight).sum()
+                loss[0] += self.angle_gain * loss_angle / target_scores_sum
         else:
             loss[0] += (pred_angle * 0).sum()
 

@@ -38,6 +38,8 @@ from .block import (
     Bottleneck,
     BottleneckCSP,
     C2f,
+    C2f_FDConv,
+    C2f_FDConvLite,
     C2fAttn,
     C2fCIB,
     C2fPSA,
@@ -53,15 +55,26 @@ from .block import (
     ImagePoolingAttn,
     MaxSigmoidAttnBlock,
     Proto,
+    CAAResidual,
+    FDBottleneck,
+    LSKAttentionResidual,
+    LSKResidual,
+    PolyKernelResidual,
+    SpatialGateResidual,
     RepC3,
     RepNCSPELAN4,
     RepVGGDW,
     ResNetLayer,
     SCDown,
     TorchVision,
+    C2f_LFDC,
+    # LFDCBlock
 )
+
 from .conv import (
     CBAM,
+    AdaptiveConcat2,
+    AdaptiveConcat3,
     ChannelAttention,
     Concat,
     Conv,
@@ -75,16 +88,9 @@ from .conv import (
     LightConv,
     RepConv,
     SpatialAttention,
+    WeightedConcat2,
+    WeightedConcat3,
 )
-from fdpg_runtime.layers import FDCConv, FDCResidual, ShallowPositionInject
-
-# Preserve the import paths used by models trained with the research source tree.
-from . import block as _block
-
-_block.FDCConv = FDCConv
-_block.FDCResidual = FDCResidual
-_block.ShallowPositionInject = ShallowPositionInject
-
 from .head import (
     OBB,
     Classify,
@@ -110,6 +116,19 @@ from .transformer import (
     TransformerEncoderLayer,
     TransformerLayer,
 )
+from .ESSamp import ESSamp
+from .EUCB import EUCB
+from .Converse2D import Converse2D
+from .L_FDC import LFDCBlock
+from fdpg_runtime.layers import FDCConv, FDCResidual, ShallowPositionInject
+
+# Register protected FDPG classes on the historical module path so existing
+# configs and checkpoints remain compatible with the full local framework.
+from . import block as _block
+
+_block.FDCConv = FDCConv
+_block.FDCResidual = FDCResidual
+_block.ShallowPositionInject = ShallowPositionInject
 
 __all__ = (
     "AIFI",
@@ -132,10 +151,14 @@ __all__ = (
     "AConv",
     "ADown",
     "Attention",
+    "AdaptiveConcat2",
+    "AdaptiveConcat3",
     "BNContrastiveHead",
     "Bottleneck",
     "BottleneckCSP",
     "C2f",
+    "C2f_FDConv",
+    "C2f_FDConvLite",
     "C2fAttn",
     "C2fCIB",
     "C2fPSA",
@@ -144,6 +167,7 @@ __all__ = (
     "C3x",
     "CBFuse",
     "CBLinear",
+    "CAAResidual",
     "ChannelAttention",
     "Classify",
     "Concat",
@@ -157,8 +181,14 @@ __all__ = (
     "DeformableTransformerDecoderLayer",
     "Detect",
     "Focus",
+    "FDBottleneck",
     "FDCConv",
     "FDCResidual",
+    "LSKAttentionResidual",
+    "LSKResidual",
+    "PolyKernelResidual",
+    "ShallowPositionInject",
+    "SpatialGateResidual",
     "GhostBottleneck",
     "GhostConv",
     "HGBlock",
@@ -181,8 +211,9 @@ __all__ = (
     "ResNetLayer",
     "SCDown",
     "Segment",
-    "ShallowPositionInject",
     "SpatialAttention",
+    "WeightedConcat2",
+    "WeightedConcat3",
     "TorchVision",
     "TransformerBlock",
     "TransformerEncoderLayer",
@@ -191,4 +222,9 @@ __all__ = (
     "YOLOEDetect",
     "YOLOESegment",
     "v10Detect",
+    "C2f_LFDC",
+    # "LFDCBlock",
+    "ESSamp",
+    "EUCB",
+    "Converse2D",
 )

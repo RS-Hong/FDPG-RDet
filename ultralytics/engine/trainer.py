@@ -562,11 +562,21 @@ class BaseTrainer:
             torch.cuda.empty_cache()
 
     def read_results_csv(self):
-        """Read results.csv into a dictionary using polars."""
-        import polars as pl  # scope for faster 'import ultralytics'
+        """Read results.csv into a dictionary."""
 
         try:
+            import polars as pl  # scope for faster 'import ultralytics'
+
             return pl.read_csv(self.csv, infer_schema_length=None).to_dict(as_series=False)
+        except ModuleNotFoundError:
+            import csv
+
+            try:
+                with open(self.csv, newline="", encoding="utf-8") as f:
+                    rows = list(csv.DictReader(f))
+                return {k: [row.get(k, "") for row in rows] for k in rows[0]} if rows else {}
+            except Exception:
+                return {}
         except Exception:
             return {}
 
@@ -616,8 +626,9 @@ class BaseTrainer:
         self.last.write_bytes(serialized_ckpt)  # save last.pt
         if self.best_fitness == self.fitness:
             self.best.write_bytes(serialized_ckpt)  # save best.pt
-        if (self.save_period > 0) and (self.epoch % self.save_period == 0):
-            (self.wdir / f"epoch{self.epoch}.pt").write_bytes(serialized_ckpt)  # save epoch, i.e. 'epoch3.pt'
+        current_epoch = self.epoch + 1
+        if (self.save_period > 0) and (current_epoch % self.save_period == 0):
+            (self.wdir / f"epoch{current_epoch}.pt").write_bytes(serialized_ckpt)  # save epoch, i.e. 'epoch10.pt'
 
     def get_dataset(self):
         """
