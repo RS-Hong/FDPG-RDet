@@ -37,9 +37,13 @@ Evaluation on the plastic-greenhouse OBB dataset used in the manuscript produced
 
 ```text
 FDPG-RDet/
+├── .github/                       # Upstream issue and CI configuration
 ├── assets/                         # Selected manuscript figures
 ├── configs/
 │   └── greenhouse-obb.example.yaml # Dataset configuration template
+├── docker/                         # Upstream container definitions
+├── docs/                           # Complete upstream documentation sources
+├── examples/                       # Official Ultralytics usage examples
 ├── fdpg_runtime/                   # FDPG runtime modules
 ├── pyarmor_runtime_000000/         # Runtime libraries
 ├── scripts/
@@ -55,6 +59,10 @@ FDPG-RDet/
 │   ├── models/
 │   ├── nn/
 │   └── utils/
+├── tests/                          # Upstream framework test suite
+├── CITATION.cff
+├── CONTRIBUTING.md
+├── mkdocs.yml
 ├── pyproject.toml
 └── LICENSE
 ```
