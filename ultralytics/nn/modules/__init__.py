@@ -17,6 +17,9 @@ Examples:
     >>> subprocess.run(f"onnxslim {f} {f} && open {f}", shell=True, check=True)  # pip install onnxslim
 """
 
+# Register protected FDPG classes on the historical module path so existing
+# configs and checkpoints remain compatible with the full local framework.
+from . import block as _block
 from .block import (
     C1,
     C2,
@@ -40,37 +43,36 @@ from .block import (
     C2f,
     C2f_FDConv,
     C2f_FDConvLite,
+    C2f_LFDC,
+    # LFDCBlock
     C2fAttn,
     C2fCIB,
     C2fPSA,
     C3Ghost,
     C3k2,
     C3x,
+    CAAResidual,
     CBFuse,
     CBLinear,
     ContrastiveHead,
+    FDBottleneck,
     GhostBottleneck,
     HGBlock,
     HGStem,
     ImagePoolingAttn,
-    MaxSigmoidAttnBlock,
-    Proto,
-    CAAResidual,
-    FDBottleneck,
     LSKAttentionResidual,
     LSKResidual,
+    MaxSigmoidAttnBlock,
     PolyKernelResidual,
-    SpatialGateResidual,
+    Proto,
     RepC3,
     RepNCSPELAN4,
     RepVGGDW,
     ResNetLayer,
     SCDown,
+    SpatialGateResidual,
     TorchVision,
-    C2f_LFDC,
-    # LFDCBlock
 )
-
 from .conv import (
     CBAM,
     AdaptiveConcat2,
@@ -91,6 +93,10 @@ from .conv import (
     WeightedConcat2,
     WeightedConcat3,
 )
+from .Converse2D import Converse2D
+from .ESSamp import ESSamp
+from .EUCB import EUCB
+from .fdpg_runtime.layers import FDCConv, FDCResidual, ShallowPositionInject
 from .head import (
     OBB,
     Classify,
@@ -104,6 +110,7 @@ from .head import (
     YOLOESegment,
     v10Detect,
 )
+from .L_FDC import LFDCBlock
 from .transformer import (
     AIFI,
     MLP,
@@ -116,15 +123,6 @@ from .transformer import (
     TransformerEncoderLayer,
     TransformerLayer,
 )
-from .ESSamp import ESSamp
-from .EUCB import EUCB
-from .Converse2D import Converse2D
-from .L_FDC import LFDCBlock
-from .fdpg_runtime.layers import FDCConv, FDCResidual, ShallowPositionInject
-
-# Register protected FDPG classes on the historical module path so existing
-# configs and checkpoints remain compatible with the full local framework.
-from . import block as _block
 
 _block.FDCConv = FDCConv
 _block.FDCResidual = FDCResidual
@@ -141,6 +139,7 @@ __all__ = (
     "CIB",
     "DFL",
     "ELAN1",
+    "EUCB",
     "MLP",
     "OBB",
     "PSA",
@@ -150,24 +149,25 @@ __all__ = (
     "A2C2f",
     "AConv",
     "ADown",
-    "Attention",
     "AdaptiveConcat2",
     "AdaptiveConcat3",
+    "Attention",
     "BNContrastiveHead",
     "Bottleneck",
     "BottleneckCSP",
     "C2f",
-    "C2f_FDConv",
-    "C2f_FDConvLite",
     "C2fAttn",
     "C2fCIB",
     "C2fPSA",
+    "C2f_FDConv",
+    "C2f_FDConvLite",
+    "C2f_LFDC",
     "C3Ghost",
     "C3k2",
     "C3x",
+    "CAAResidual",
     "CBFuse",
     "CBLinear",
-    "CAAResidual",
     "ChannelAttention",
     "Classify",
     "Concat",
@@ -175,20 +175,18 @@ __all__ = (
     "Conv",
     "Conv2",
     "ConvTranspose",
+    "Converse2D",
     "DWConv",
     "DWConvTranspose2d",
     "DeformableTransformerDecoder",
     "DeformableTransformerDecoderLayer",
     "Detect",
-    "Focus",
+    # "LFDCBlock",
+    "ESSamp",
     "FDBottleneck",
     "FDCConv",
     "FDCResidual",
-    "LSKAttentionResidual",
-    "LSKResidual",
-    "PolyKernelResidual",
-    "ShallowPositionInject",
-    "SpatialGateResidual",
+    "Focus",
     "GhostBottleneck",
     "GhostConv",
     "HGBlock",
@@ -196,11 +194,14 @@ __all__ = (
     "ImagePoolingAttn",
     "Index",
     "LRPCHead",
+    "LSKAttentionResidual",
+    "LSKResidual",
     "LayerNorm2d",
     "LightConv",
     "MLPBlock",
     "MSDeformAttn",
     "MaxSigmoidAttnBlock",
+    "PolyKernelResidual",
     "Pose",
     "Proto",
     "RTDETRDecoder",
@@ -211,20 +212,17 @@ __all__ = (
     "ResNetLayer",
     "SCDown",
     "Segment",
+    "ShallowPositionInject",
     "SpatialAttention",
-    "WeightedConcat2",
-    "WeightedConcat3",
+    "SpatialGateResidual",
     "TorchVision",
     "TransformerBlock",
     "TransformerEncoderLayer",
     "TransformerLayer",
+    "WeightedConcat2",
+    "WeightedConcat3",
     "WorldDetect",
     "YOLOEDetect",
     "YOLOESegment",
     "v10Detect",
-    "C2f_LFDC",
-    # "LFDCBlock",
-    "ESSamp",
-    "EUCB",
-    "Converse2D",
 )
