@@ -22,8 +22,8 @@ The FDR-Adapter and EPGI modules are inserted into the P3 and P4 detection branc
 Evaluation on the plastic-greenhouse OBB dataset used in the manuscript produced the following results:
 
 | Precision (%) | Recall (%) | F1-score (%) | mAP<sub>50</sub> (%) | mAP<sub>50-95</sub> (%) |
-| ---: | ---: | ---: | ---: | ---: |
-| 86.06 | 84.37 | 85.20 | 91.41 | 71.53 |
+| ------------: | ---------: | -----------: | -------------------: | ----------------------: |
+|         86.06 |      84.37 |        85.20 |                91.41 |                   71.53 |
 
 ### Qualitative comparison
 
@@ -158,7 +158,7 @@ python scripts/predict.py \
 
 Predicted oriented boxes and optional text labels are written to `runs/predict/`.
 
-## Acknowledgements
+## Acknowledgments
 
 This project uses [Ultralytics](https://github.com/ultralytics/ultralytics) as its detection framework. Please also comply with the licenses and citation requirements of all upstream dependencies.
 
