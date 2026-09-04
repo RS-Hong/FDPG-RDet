@@ -1,8 +1,8 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
 from collections import OrderedDict
-import math
+
+import torch
+import torch.nn.functional as F
+from torch import nn
 
 """
 # --------------------------------------------
@@ -12,12 +12,10 @@ import math
 
 
 class LayerNorm(nn.Module):
-    '''
-    LayerNorm that supports two data formats: channels_last (default) or channels_first.
-    The ordering of the dimensions in the inputs. channels_last corresponds to inputs with
-    shape (batch_size, height, width, channels) while channels_first corresponds to inputs
-    with shape (batch_size, channels, height, width).
-    '''
+    """LayerNorm that supports two data formats: channels_last (default) or channels_first. The ordering of the
+    dimensions in the inputs. channels_last corresponds to inputs with shape (batch_size, height, width, channels)
+    while channels_first corresponds to inputs with shape (batch_size, channels, height, width).
+    """
 
     def __init__(self, normalized_shape, eps=1e-6, data_format="channels_last"):
         super().__init__()
@@ -51,7 +49,7 @@ def sequential(*args):
     """
     if len(args) == 1:
         if isinstance(args[0], OrderedDict):
-            raise NotImplementedError('sequential does not support OrderedDict input.')
+            raise NotImplementedError("sequential does not support OrderedDict input.")
         return args[0]  # No sequential is needed.
     modules = []
     for module in args:
@@ -71,8 +69,8 @@ def sequential(*args):
 
 
 class Converse2D(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, scale=1, padding=2, padding_mode='circular', eps=1e-5):
-        super(Converse2D, self).__init__()
+    def __init__(self, in_channels, out_channels, kernel_size, scale=1, padding=2, padding_mode="circular", eps=1e-5):
+        super().__init__()
         """
         Converse2D Operator for Image Restoration Tasks.
 
@@ -108,23 +106,23 @@ class Converse2D(nn.Module):
         self.bias = nn.Parameter(torch.zeros(1, self.in_channels, 1, 1))
 
         # 恢复原始的初始化方法以确保兼容性
-        self.weight.data = nn.functional.softmax(self.weight.data.view(1, self.in_channels, -1), dim=-1).view(1,
-                                                                                                              self.in_channels,
-                                                                                                              self.kernel_size,
-                                                                                                              self.kernel_size)
+        self.weight.data = nn.functional.softmax(self.weight.data.view(1, self.in_channels, -1), dim=-1).view(
+            1, self.in_channels, self.kernel_size, self.kernel_size
+        )
 
     def forward(self, x):
         # 恢复原始的biaseps计算方法，提高数值稳定性
         biaseps = torch.tanh(self.bias - 9.0) + self.eps
 
         if self.padding > 0:
-            x = nn.functional.pad(x, pad=[self.padding, self.padding, self.padding, self.padding],
-                                  mode=self.padding_mode, value=0)
+            x = nn.functional.pad(
+                x, pad=[self.padding, self.padding, self.padding, self.padding], mode=self.padding_mode, value=0
+            )
 
         _, _, h, w = x.shape
         STy = self.upsample(x, scale=self.scale)
         if self.scale != 1:
-            x = nn.functional.interpolate(x, scale_factor=self.scale, mode='nearest')
+            x = nn.functional.interpolate(x, scale_factor=self.scale, mode="nearest")
 
         # 保持原始的FFT计算流程，确保类型一致性
         FB = self.p2o(self.weight, (h * self.scale, w * self.scale))
@@ -142,15 +140,16 @@ class Converse2D(nn.Module):
         out = torch.real(torch.fft.ifftn(FX, dim=(-2, -1)))
 
         if self.padding > 0:
-            out = out[..., self.padding * self.scale:-self.padding * self.scale,
-                  self.padding * self.scale:-self.padding * self.scale]
+            out = out[
+                ...,
+                self.padding * self.scale : -self.padding * self.scale,
+                self.padding * self.scale : -self.padding * self.scale,
+            ]
 
         return out.to(x.dtype)
 
     def splits(self, a, scale):
-        '''
-        修复版本的split函数，保持原始逻辑但提高效率
-        '''
+        """修复版本的split函数，保持原始逻辑但提高效率."""
         *leading_dims, W, H = a.size()
         W_s, H_s = W // scale, H // scale
 
@@ -158,8 +157,13 @@ class Converse2D(nn.Module):
         b = a.view(*leading_dims, scale, W_s, scale, H_s)
 
         # 保持原始的排列顺序
-        permute_order = list(range(len(leading_dims))) + [len(leading_dims) + 1, len(leading_dims) + 3,
-                                                          len(leading_dims), len(leading_dims) + 2]
+        permute_order = [
+            *list(range(len(leading_dims))),
+            len(leading_dims) + 1,
+            len(leading_dims) + 3,
+            len(leading_dims),
+            len(leading_dims) + 2,
+        ]
         b = b.permute(*permute_order).contiguous()
 
         # Combine the scale dimensions
@@ -167,29 +171,27 @@ class Converse2D(nn.Module):
         return b
 
     def p2o(self, psf, shape):
-        '''
-        Convert point-spread function to optical transfer function.
-        otf = p2o(psf) computes the Fast Fourier Transform (FFT) of the
-        point-spread function (PSF) array and creates the optical transfer
-        function (OTF) array that is not influenced by the PSF off-centering.
+        """Convert point-spread function to optical transfer function. otf = p2o(psf) computes the Fast Fourier
+        Transform (FFT) of the point-spread function (PSF) array and creates the optical transfer function (OTF)
+        array that is not influenced by the PSF off-centering.
+
         Args:
             psf: NxCxhxw
             shape: [H, W]
+
         Returns:
-            otf: NxCxHxWx2
-        '''
+            otf: NxCxHxWx2.
+        """
         otf = torch.zeros(psf.shape[:-2] + shape).type_as(psf)
-        otf[..., :psf.shape[-2], :psf.shape[-1]].copy_(psf)
+        otf[..., : psf.shape[-2], : psf.shape[-1]].copy_(psf)
         otf = torch.roll(otf, (-int(psf.shape[-2] / 2), -int(psf.shape[-1] / 2)), dims=(-2, -1))
         otf = torch.fft.fftn(otf.float(), dim=(-2, -1))
 
         return otf.to(psf.dtype)
 
     def upsample(self, x, scale=3):
-        '''s-fold upsampler
-        Upsampling the spatial size by filling the new entries with zeros
-        x: tensor image, NxCxWxH
-        '''
+        """s-fold upsampler Upsampling the spatial size by filling the new entries with zeros x: tensor image, NxCxWxH.
+        """
         st = 0
         z = torch.zeros((x.shape[0], x.shape[1], x.shape[2] * scale, x.shape[3] * scale)).type_as(x)
         z[..., st::scale, st::scale].copy_(x)
@@ -204,9 +206,10 @@ class Converse2D(nn.Module):
 
 
 class ConverseBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, scale=1, padding=2, padding_mode='replicate',
-                 eps=1e-5):
-        super(ConverseBlock, self).__init__()
+    def __init__(
+        self, in_channels, out_channels, kernel_size=3, scale=1, padding=2, padding_mode="replicate", eps=1e-5
+    ):
+        super().__init__()
         """
         ConverseBlock: A Convolutional Block for Image Restoration using Converse2D Operations.
 
@@ -229,18 +232,29 @@ class ConverseBlock(nn.Module):
                 Tensor: Output tensor of shape (N, out_channels, H * scale, W * scale)
         """
 
-        self.conv1 = nn.Sequential(LayerNorm(in_channels, eps=1e-5, data_format="channels_first"),
-                                   nn.Conv2d(in_channels, 2 * out_channels, 1, 1, 0),
-                                   nn.GELU(),
-                                   Converse2D(2 * out_channels, 2 * out_channels, kernel_size, scale=scale,
-                                              padding=padding, padding_mode=padding_mode, eps=eps),
-                                   nn.GELU(),
-                                   nn.Conv2d(2 * out_channels, out_channels, 1, 1, 0))
+        self.conv1 = nn.Sequential(
+            LayerNorm(in_channels, eps=1e-5, data_format="channels_first"),
+            nn.Conv2d(in_channels, 2 * out_channels, 1, 1, 0),
+            nn.GELU(),
+            Converse2D(
+                2 * out_channels,
+                2 * out_channels,
+                kernel_size,
+                scale=scale,
+                padding=padding,
+                padding_mode=padding_mode,
+                eps=eps,
+            ),
+            nn.GELU(),
+            nn.Conv2d(2 * out_channels, out_channels, 1, 1, 0),
+        )
 
-        self.conv2 = nn.Sequential(LayerNorm(in_channels, eps=1e-5, data_format="channels_first"),
-                                   nn.Conv2d(out_channels, 2 * out_channels, 1, 1, 0),
-                                   nn.GELU(),
-                                   nn.Conv2d(2 * out_channels, out_channels, 1, 1, 0))
+        self.conv2 = nn.Sequential(
+            LayerNorm(in_channels, eps=1e-5, data_format="channels_first"),
+            nn.Conv2d(out_channels, 2 * out_channels, 1, 1, 0),
+            nn.GELU(),
+            nn.Conv2d(2 * out_channels, out_channels, 1, 1, 0),
+        )
 
     def forward(self, x):
         x = self.conv1(x) + x
@@ -249,9 +263,10 @@ class ConverseBlock(nn.Module):
 
 
 class ConverseBlockAlphaVariant(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, scale=1, padding=2, padding_mode='replicate',
-                 eps=1e-5):
-        super(ConverseBlockAlphaVariant, self).__init__()
+    def __init__(
+        self, in_channels, out_channels, kernel_size=3, scale=1, padding=2, padding_mode="replicate", eps=1e-5
+    ):
+        super().__init__()
         """
         ConverseBlockAlphaVariant: Only difference is the addition of alpha parameters to the convolution blocks.
         """
@@ -259,18 +274,29 @@ class ConverseBlockAlphaVariant(nn.Module):
         self.alpha1 = nn.Parameter(torch.zeros((1, out_channels, 1, 1)), requires_grad=True)
         self.alpha2 = nn.Parameter(torch.zeros((1, out_channels, 1, 1)), requires_grad=True)
 
-        self.conv1 = nn.Sequential(LayerNorm(in_channels, eps=1e-5, data_format="channels_first"),
-                                   nn.Conv2d(in_channels, 2 * out_channels, 1, 1, 0),
-                                   nn.GELU(),
-                                   Converse2D(2 * out_channels, 2 * out_channels, kernel_size, scale=scale,
-                                              padding=padding, padding_mode=padding_mode, eps=eps),
-                                   nn.GELU(),
-                                   nn.Conv2d(2 * out_channels, out_channels, 1, 1, 0))
+        self.conv1 = nn.Sequential(
+            LayerNorm(in_channels, eps=1e-5, data_format="channels_first"),
+            nn.Conv2d(in_channels, 2 * out_channels, 1, 1, 0),
+            nn.GELU(),
+            Converse2D(
+                2 * out_channels,
+                2 * out_channels,
+                kernel_size,
+                scale=scale,
+                padding=padding,
+                padding_mode=padding_mode,
+                eps=eps,
+            ),
+            nn.GELU(),
+            nn.Conv2d(2 * out_channels, out_channels, 1, 1, 0),
+        )
 
-        self.conv2 = nn.Sequential(LayerNorm(in_channels, eps=1e-5, data_format="channels_first"),
-                                   nn.Conv2d(out_channels, 2 * out_channels, 1, 1, 0),
-                                   nn.GELU(),
-                                   nn.Conv2d(2 * out_channels, out_channels, 1, 1, 0))
+        self.conv2 = nn.Sequential(
+            LayerNorm(in_channels, eps=1e-5, data_format="channels_first"),
+            nn.Conv2d(out_channels, 2 * out_channels, 1, 1, 0),
+            nn.GELU(),
+            nn.Conv2d(2 * out_channels, out_channels, 1, 1, 0),
+        )
 
     def forward(self, x):
         x = self.alpha1 * self.conv1(x) + x
@@ -279,13 +305,11 @@ class ConverseBlockAlphaVariant(nn.Module):
 
 
 class ResidualBlock(nn.Module):
-    """Residual block
-    ---Conv-ReLU-Conv-+-
-     |________________|
+    """Residual block ---Conv-ReLU-Conv-+- |________________|.
     """
 
     def __init__(self, num_features=64):
-        super(ResidualBlock, self).__init__()
+        super().__init__()
         self.conv1 = nn.Conv2d(num_features, num_features, 3, 1, 1, bias=True)
         self.conv2 = nn.Conv2d(num_features, num_features, 3, 1, 1, bias=True)
 
@@ -301,7 +325,7 @@ if __name__ == "__main__":
     input_tensor = torch.randn(B, C, H, W)  # 随机生成输入张量
     dim = C
     # 创建 Converse2D 实例
-    block = Converse2D(in_channels=64, out_channels=64,kernel_size=3,scale=2)
+    block = Converse2D(in_channels=64, out_channels=64, kernel_size=3, scale=2)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     sablock = block.to(device)
     print(sablock)
@@ -311,7 +335,7 @@ if __name__ == "__main__":
     # 打印输入和输出的形状
     print(f"Input: {input_tensor.shape}")
     print(f"Output: {output.shape}")
-    block = ConverseBlock(in_channels=64, out_channels=64,kernel_size=3,scale=1)
+    block = ConverseBlock(in_channels=64, out_channels=64, kernel_size=3, scale=1)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     sablock = block.to(device)
     print(sablock)
@@ -321,7 +345,7 @@ if __name__ == "__main__":
     # 打印输入和输出的形状
     print(f"Input: {input_tensor.shape}")
     print(f"Output: {output.shape}")
-    block = ConverseBlockAlphaVariant(in_channels=64, out_channels=64,kernel_size=3,scale=1)
+    block = ConverseBlockAlphaVariant(in_channels=64, out_channels=64, kernel_size=3, scale=1)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     sablock = block.to(device)
     print(sablock)
