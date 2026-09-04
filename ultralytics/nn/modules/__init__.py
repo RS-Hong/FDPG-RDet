@@ -120,7 +120,7 @@ from .ESSamp import ESSamp
 from .EUCB import EUCB
 from .Converse2D import Converse2D
 from .L_FDC import LFDCBlock
-from fdpg_runtime.layers import FDCConv, FDCResidual, ShallowPositionInject
+from .fdpg_runtime.layers import FDCConv, FDCResidual, ShallowPositionInject
 
 # Register protected FDPG classes on the historical module path so existing
 # configs and checkpoints remain compatible with the full local framework.

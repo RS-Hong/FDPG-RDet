@@ -1,6 +1,6 @@
 """Compatibility imports for FDPG-RDet checkpoints."""
 
-from fdpg_runtime.fdconv import (
+from .fdpg_runtime.fdconv import (
     FDConv,
     FrequencyBandModulation,
     KernelSpatialModulation_Global,

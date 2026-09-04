@@ -13,8 +13,6 @@ This repository preserves the complete project-local Ultralytics 8.3.221 source 
 
 ## Architecture
 
-![FDPG-RDet architecture](assets/architecture.png)
-
 The FDR-Adapter and EPGI modules are inserted into the P3 and P4 detection branches, while the standard three-scale OBB head operates on P3, P4, and P5 features.
 
 ## Main results
@@ -25,44 +23,32 @@ Evaluation on the plastic-greenhouse OBB dataset used in the manuscript produced
 | ---: | ---: | ---: | ---: | ---: |
 | 86.06 | 84.37 | 85.20 | 91.41 | 71.53 |
 
-### Qualitative comparison
-
-![Qualitative comparison](assets/qualitative_comparison.png)
-
-### Ablation study
-
-![Ablation comparison](assets/ablation_results.png)
-
 ## Repository layout
 
 ```text
 FDPG-RDet/
 ├── .github/                       # Upstream issue and CI configuration
-├── assets/                         # Selected manuscript figures
-├── configs/
-│   └── greenhouse-obb.example.yaml # Dataset configuration template
 ├── docker/                         # Upstream container definitions
 ├── docs/                           # Complete upstream documentation sources
 ├── examples/                       # Official Ultralytics usage examples
-├── fdpg_runtime/                   # FDPG runtime modules
-├── pyarmor_runtime_000000/         # Runtime libraries
-├── scripts/
-│   ├── train.py
-│   ├── val.py
-│   ├── predict.py
-│   └── smoke_test.py
 ├── ultralytics/                    # Complete Ultralytics source package
 │   ├── cfg/models/v8/
 │   │   ├── yolov8s-fdpg-rdet-obb.yaml
 │   │   └── yolov8-obb-*.yaml        # Original and ablation configurations
 │   ├── engine/
 │   ├── models/
-│   ├── nn/
+│   ├── nn/modules/
+│   │   ├── fdpg_runtime/             # Protected FDPG implementation
+│   │   └── pyarmor_runtime_000000/   # Protected runtime libraries
 │   └── utils/
 ├── tests/                          # Upstream framework test suite
 ├── CITATION.cff
 ├── CONTRIBUTING.md
+├── greenhouse-obb.yaml             # Dataset configuration
 ├── mkdocs.yml
+├── train.py                        # Training entry point
+├── test.py                         # Validation entry point
+├── predict.py                      # Prediction entry point
 ├── pyproject.toml
 └── LICENSE
 ```
@@ -80,10 +66,12 @@ conda activate fdpg-rdet
 pip install -e .
 ```
 
-Verify the installation:
+Verify the installation and available entry points:
 
 ```bash
-python scripts/smoke_test.py
+python train.py --help
+python test.py --help
+python predict.py --help
 ```
 
 The included source tree is based on Ultralytics 8.3.221.
@@ -110,7 +98,7 @@ Each label row contains a class index followed by four normalized corner coordin
 class_id x1 y1 x2 y2 x3 y3 x4 y4
 ```
 
-Copy `configs/greenhouse-obb.example.yaml` to `configs/greenhouse-obb.yaml` and replace its `path` with the absolute dataset directory.
+Set `path` in `greenhouse-obb.yaml` to the local dataset directory.
 
 ### Dataset download
 
@@ -123,8 +111,8 @@ Copy `configs/greenhouse-obb.example.yaml` to `configs/greenhouse-obb.yaml` and 
 The default options reproduce the main manuscript setup: 512 x 512 input, AdamW, 300 maximum epochs, early-stopping patience of 60, and random seed 42.
 
 ```bash
-python scripts/train.py \
-  --data configs/greenhouse-obb.yaml \
+python train.py \
+  --data greenhouse-obb.yaml \
   --device 0 \
   --batch 32 \
   --epochs 300
@@ -137,9 +125,9 @@ Training outputs are written to `runs/train/` and are ignored by Git.
 Weights are not included. Supply a locally trained or separately downloaded checkpoint:
 
 ```bash
-python scripts/val.py \
+python test.py \
   --weights /path/to/best.pt \
-  --data configs/greenhouse-obb.yaml \
+  --data greenhouse-obb.yaml \
   --split test \
   --device 0
 ```
@@ -147,7 +135,7 @@ python scripts/val.py \
 ## Prediction
 
 ```bash
-python scripts/predict.py \
+python predict.py \
   --weights /path/to/best.pt \
   --source /path/to/images \
   --conf 0.40 \

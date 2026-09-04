@@ -5,7 +5,8 @@ __pycache__/
 
 # C extensions
 *.so
-!/pyarmor_runtime_000000/*.so
+!/ultralytics/nn/modules/pyarmor_runtime_000000/**/*.so
+!/ultralytics/nn/modules/pyarmor_runtime_000000/**/*.pyd
 
 # Distribution / packaging
 .Python
@@ -147,7 +148,7 @@ dmypy.json
 runs/
 wandb/
 .DS_Store
-/.ultralytics/
+/.ultralytics_config/
 /tmp_protected_src/
 /.test_deps/
 pyarmor*.log

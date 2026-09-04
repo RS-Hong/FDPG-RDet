@@ -1,8 +1,0 @@
-# Copy this file to configs/greenhouse-obb.yaml and replace the path below.
-path: /absolute/path/to/FDPG-Greenhouse-OBB
-train: images/train
-val: images/val
-test: images/test
-
-names:
-  0: greenhouse
