@@ -1,6 +1,7 @@
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
+
 
 # ---------- helpers ----------
 def conv_dw_pw(in_ch, out_ch, kernel_size, padding=0, dilation=1):
@@ -14,49 +15,51 @@ def conv_dw_pw(in_ch, out_ch, kernel_size, padding=0, dilation=1):
         nn.ReLU(inplace=True),
     )
 
+
 class SobelLayer(nn.Module):
     """Compute per-channel gradient magnitude approx via Sobel filters (works with groups conv)."""
+
     def __init__(self, channels):
         super().__init__()
         self.channels = channels
         # 3x3 Sobel kernels for x and y
-        kx = torch.tensor([[-1.,0.,1.],[-2.,0.,2.],[-1.,0.,1.]], dtype=torch.float32)
-        ky = torch.tensor([[-1.,-2.,-1.],[0.,0.,0.],[1.,2.,1.]], dtype=torch.float32)
-        kx = kx.view(1,1,3,3)
-        ky = ky.view(1,1,3,3)
+        kx = torch.tensor([[-1.0, 0.0, 1.0], [-2.0, 0.0, 2.0], [-1.0, 0.0, 1.0]], dtype=torch.float32)
+        ky = torch.tensor([[-1.0, -2.0, -1.0], [0.0, 0.0, 0.0], [1.0, 2.0, 1.0]], dtype=torch.float32)
+        kx = kx.view(1, 1, 3, 3)
+        ky = ky.view(1, 1, 3, 3)
         # We'll use groups=channels to apply same kernel per channel
-        self.register_buffer('kx', kx.repeat(channels,1,1,1))  # (C,1,3,3)
-        self.register_buffer('ky', ky.repeat(channels,1,1,1))
+        self.register_buffer("kx", kx.repeat(channels, 1, 1, 1))  # (C,1,3,3)
+        self.register_buffer("ky", ky.repeat(channels, 1, 1, 1))
 
     def forward(self, x):
         # x: (B,C,H,W)
-        B,C,H,W = x.shape
+        _B, C, _H, _W = x.shape
         # pad with reflect to preserve size
         pad = 1
         # conv with groups=C: weight shape (C,1,3,3)
         gx = F.conv2d(x, self.kx, bias=None, stride=1, padding=pad, groups=C)
         gy = F.conv2d(x, self.ky, bias=None, stride=1, padding=pad, groups=C)
         # gradient magnitude per channel
-        gm = torch.sqrt(gx*gx + gy*gy + 1e-6)  # (B,C,H,W)
+        gm = torch.sqrt(gx * gx + gy * gy + 1e-6)  # (B,C,H,W)
         return gm
+
 
 # ---------- FDC Block ----------
 class LFDCBlock(nn.Module):
+    """Improved Frequency Dynamic Convolution block: - LFBD: 3 parallel depthwise-separable convs (5x5, 3x3, 1x1) ->
+    F_low, F_mid, F_high - LSM: compute G from input F (per-channel gradient magnitude averaged), produce pixel-wise
+    beta weights and modulate the 3 band features per-pixel - FBM: compute global energy per band and fuse with
+    alpha weights.
     """
-    Improved Frequency Dynamic Convolution block:
-      - LFBD: 3 parallel depthwise-separable convs (5x5, 3x3, 1x1) -> F_low, F_mid, F_high
-      - LSM: compute G from input F (per-channel gradient magnitude averaged), produce pixel-wise beta weights
-             and modulate the 3 band features per-pixel
-      - FBM: compute global energy per band and fuse with alpha weights
-    """
+
     def __init__(self, in_ch, out_ch, reduction=4):
         super().__init__()
         self.in_ch = in_ch
         self.out_ch = out_ch
 
         # LFBD: depthwise separable convs as band proxies
-        self.band_low  = conv_dw_pw(in_ch, out_ch, kernel_size=5, padding=2)
-        self.band_mid  = conv_dw_pw(in_ch, out_ch, kernel_size=3, padding=1)
+        self.band_low = conv_dw_pw(in_ch, out_ch, kernel_size=5, padding=2)
+        self.band_mid = conv_dw_pw(in_ch, out_ch, kernel_size=3, padding=1)
         # high band uses a high-pass prefilter + small kernel; here we approximate via 3x3 dilated or 1x1
         # combined with subtractive average pooling for high-pass
         self.band_high_prepool = nn.AvgPool2d(kernel_size=3, stride=1, padding=1)
@@ -68,11 +71,11 @@ class LFDCBlock(nn.Module):
         # LSM: map G (B,1,H,W) [+ optionally band features] -> pixel-wise 3 weights
         # We'll use small conv net that takes concatenation of G and channel-compressed band responses
         # to produce beta (B,3,H,W)
-        self.compress = nn.Conv2d(in_ch, max(8, in_ch//reduction), 1, bias=False)  # for computational efficiency
+        self.compress = nn.Conv2d(in_ch, max(8, in_ch // reduction), 1, bias=False)  # for computational efficiency
         self.lsm_net = nn.Sequential(
-            nn.Conv2d(1 + max(8, in_ch//reduction)*0 + 3 * (out_ch//reduction if False else 1), 64, 3, padding=1),
+            nn.Conv2d(1 + max(8, in_ch // reduction) * 0 + 3 * (out_ch // reduction if False else 1), 64, 3, padding=1),
             nn.ReLU(inplace=True),
-            nn.Conv2d(64, 3, 1)  # outputs raw scores for low/mid/high
+            nn.Conv2d(64, 3, 1),  # outputs raw scores for low/mid/high
         )
         # Note: to keep it simple & efficient, we'll only feed G and spatially pooled compressed features.
         # Simpler robust variant below (more practical)
@@ -81,7 +84,7 @@ class LFDCBlock(nn.Module):
         self.lsm_simple = nn.Sequential(
             nn.Conv2d(1, 16, 3, padding=1, bias=False),
             nn.ReLU(inplace=True),
-            nn.Conv2d(16, 3, 1)  # raw scores
+            nn.Conv2d(16, 3, 1),  # raw scores
         )
 
         # FBM: fusion conv after concatenation or energy-weighted fusion
@@ -94,11 +97,9 @@ class LFDCBlock(nn.Module):
         self.gamma = nn.Parameter(torch.tensor(0.1))
 
     def forward(self, F):
+        """F: (B, C, H, W) returns: F_fdc (B, out_ch, H, W).
         """
-        F: (B, C, H, W)
-        returns: F_fdc (B, out_ch, H, W)
-        """
-        B,C,H,W = F.shape
+        B, C, _H, _W = F.shape
 
         # 1) LFBD: produce 3 band feature maps (B, out_ch, H, W)
         F_low = self.band_low(F)
@@ -108,41 +109,43 @@ class LFDCBlock(nn.Module):
         F_high = self.band_high(F_hp)
 
         # 2) LSM: compute G(p) from input F
-        gm = self.sobel(F)             # (B,C,H,W): per-channel gradient magnitude
-        G = gm.mean(dim=1, keepdim=True)   # (B,1,H,W) average across channels -> local highfreq map
+        gm = self.sobel(F)  # (B,C,H,W): per-channel gradient magnitude
+        G = gm.mean(dim=1, keepdim=True)  # (B,1,H,W) average across channels -> local highfreq map
 
         # optional local smoothing: helps suppress isolated noise
-        G_s = F.avg_pool2d = F  # placeholder: skip heavy operations; (we can smooth G if needed)
+        F.avg_pool2d = F  # placeholder: skip heavy operations; (we can smooth G if needed)
         # compute pixel-wise beta weights (B,3,H,W)
-        beta_logits = self.lsm_simple(G)   # raw scores
+        beta_logits = self.lsm_simple(G)  # raw scores
         beta = torch.softmax(beta_logits, dim=1)  # softmax along channel (3 bands), sum=1 per pixel
 
         # 3) pixel-wise modulation: apply beta to bands
         # Ensure same channel dims (out_ch)
         # Each band is (B, out_ch, H, W); beta is (B,3,H,W) -> expand to match channels
-        b_low  = beta[:,0:1,:,:].expand(-1, F_low.size(1), -1, -1)
-        b_mid  = beta[:,1:2,:,:].expand(-1, F_mid.size(1), -1, -1)
-        b_high = beta[:,2:3,:,:].expand(-1, F_high.size(1), -1, -1)
+        b_low = beta[:, 0:1, :, :].expand(-1, F_low.size(1), -1, -1)
+        b_mid = beta[:, 1:2, :, :].expand(-1, F_mid.size(1), -1, -1)
+        b_high = beta[:, 2:3, :, :].expand(-1, F_high.size(1), -1, -1)
 
-        F_low_t  = F_low  * b_low
-        F_mid_t  = F_mid  * b_mid
+        F_low_t = F_low * b_low
+        F_mid_t = F_mid * b_mid
         F_high_t = F_high * b_high
 
         # 4) FBM: global energy calculation and fusion
         # Compute per-band global energy per sample:
         # E_i shape (B,)
-        E_low  = (F_low_t  ** 2).mean(dim=(1,2,3))   # (B,)
-        E_mid  = (F_mid_t  ** 2).mean(dim=(1,2,3))
-        E_high = (F_high_t ** 2).mean(dim=(1,2,3))
+        E_low = (F_low_t**2).mean(dim=(1, 2, 3))  # (B,)
+        E_mid = (F_mid_t**2).mean(dim=(1, 2, 3))
+        E_high = (F_high_t**2).mean(dim=(1, 2, 3))
         E = torch.stack([E_low, E_mid, E_high], dim=1)  # (B,3)
         # normalize to get alpha per sample
         alpha = E / (E.sum(dim=1, keepdim=True) + 1e-6)  # (B,3)
-        alpha = alpha.view(B,3,1,1)  # (B,3,1,1)
+        alpha = alpha.view(B, 3, 1, 1)  # (B,3,1,1)
 
         # fuse using alpha weights (apply per-sample)
-        F_fused = alpha[:,0:1,:,:].expand(-1, F_low_t.size(1), -1, -1) * F_low_t \
-                + alpha[:,1:2,:,:].expand(-1, F_mid_t.size(1), -1, -1) * F_mid_t \
-                + alpha[:,2:3,:,:].expand(-1, F_high_t.size(1), -1, -1) * F_high_t
+        F_fused = (
+            alpha[:, 0:1, :, :].expand(-1, F_low_t.size(1), -1, -1) * F_low_t
+            + alpha[:, 1:2, :, :].expand(-1, F_mid_t.size(1), -1, -1) * F_mid_t
+            + alpha[:, 2:3, :, :].expand(-1, F_high_t.size(1), -1, -1) * F_high_t
+        )
 
         # optional 1x1 refine
         out = self.fuse_conv(F_fused)
