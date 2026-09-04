@@ -11,7 +11,7 @@ CONFIG_DIR = ROOT / ".ultralytics"
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("YOLO_CONFIG_DIR", str(CONFIG_DIR))
 
-from ultralytics import YOLO  # noqa: E402
+from ultralytics import YOLO
 
 
 def main():
