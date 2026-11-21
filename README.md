@@ -108,7 +108,7 @@ Set `path` in `greenhouse-obb.yaml` to the local dataset directory.
 
 ## Training
 
-The default options reproduce the main manuscript setup: 512 x 512 input, AdamW, 300 maximum epochs, early-stopping patience of 60, and random seed 42.
+The training script defaults to 512 x 512 input, AdamW, 300 maximum epochs, early-stopping patience of 60, and random seed 42.
 
 ```bash
 python train.py \
@@ -145,6 +145,16 @@ python predict.py \
 ```
 
 Predicted oriented boxes and optional text labels are written to `runs/predict/`.
+
+## Mode selection
+
+```bash
+python -m fdpg train --mode nms-free --data greenhouse-obb.yaml --device 0
+python -m fdpg val --mode nms-free --weights /path/to/fdpg-ipc.pt --data greenhouse-obb.yaml --device 0
+python -m fdpg predict --mode nms-free --weights /path/to/fdpg-ipc.pt --source /path/to/images --device 0
+```
+
+Use `--mode nms` for standard FDPG. Use weights trained in the selected mode.
 
 ## Acknowledgements
 

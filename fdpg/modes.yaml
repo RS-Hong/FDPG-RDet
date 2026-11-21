@@ -1,0 +1,53 @@
+# Change just this value to select the default for the CLI and Python API.
+default_mode: nms
+
+# Relative paths below are resolved against the repository root.
+modes:
+  nms:
+    weights: weights/fdpg.pt
+  nms-free:
+    weights: weights/fdpg-ipc.pt
+
+model: ultralytics/cfg/models/v8/yolov8s-fdpg-rdet-obb.yaml
+data: greenhouse-obb.yaml
+inference:
+  imgsz: 512
+  batch: 1
+  half: false
+  max_det: 1000
+  iou: 0.7
+  rect: true
+
+# Settings for new training runs.
+training:
+  epochs: 260
+  batch: 16
+  imgsz: 512
+  seed: 42
+  deterministic: true
+  single_cls: true
+  optimizer: AdamW
+  lr0: 0.001
+  lrf: 0.01
+  momentum: 0.937
+  weight_decay: 0.0005
+  warmup_epochs: 5
+  cos_lr: true
+  patience: 260
+  close_mosaic: 25
+  degrees: 90
+  translate: 0.1
+  scale: 0.35
+  flipud: 0.5
+  fliplr: 0.5
+  mosaic: 0.7
+  box: 10.0
+  cls: 0.25
+  dfl: 2.0
+  max_det: 1000
+  iou: 0.7
+  conf: 0.01
+  workers: 0
+  amp: false
+  save_period: -1
+  plots: false
