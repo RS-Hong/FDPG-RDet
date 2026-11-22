@@ -15,13 +15,16 @@ This repository preserves the complete project-local Ultralytics 8.3.221 source 
 
 The FDR-Adapter and EPGI modules are inserted into the P3 and P4 detection branches, while the standard three-scale OBB head operates on P3, P4, and P5 features.
 
+Two modes are available: `nms` (FDPG-RDet) and `nms-free` (FDPG-IPC). Use a checkpoint trained in the selected mode.
+
 ## Main results
 
 Evaluation on the plastic-greenhouse OBB dataset used in the manuscript produced the following results:
 
-| Precision (%) | Recall (%) | F1-score (%) | mAP<sub>50</sub> (%) | mAP<sub>50-95</sub> (%) |
-| ---: | ---: | ---: | ---: | ---: |
-| 86.06 | 84.37 | 85.20 | 91.41 | 71.53 |
+| Model | Mode | Precision (%) | Recall (%) | F1-score (%) | mAP<sub>50</sub> (%) | mAP<sub>50-95</sub> (%) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| FDPG-RDet | `nms` | 86.06 | 84.37 | 85.20 | 91.41 | 71.53 |
+| FDPG-IPC | `nms-free` | 84.82 | 80.60 | 82.66 | 88.95 | 70.17 |
 
 ## Repository layout
 
@@ -31,6 +34,7 @@ FDPG-RDet/
 ├── docker/                         # Upstream container definitions
 ├── docs/                           # Complete upstream documentation sources
 ├── examples/                       # Official Ultralytics usage examples
+├── fdpg/                           # Mode selection and IPC loss
 ├── ultralytics/                    # Complete Ultralytics source package
 │   ├── cfg/models/v8/
 │   │   ├── yolov8s-fdpg-rdet-obb.yaml
@@ -69,9 +73,7 @@ pip install -e .
 Verify the installation and available entry points:
 
 ```bash
-python train.py --help
-python test.py --help
-python predict.py --help
+python -m fdpg --help
 ```
 
 The included source tree is based on Ultralytics 8.3.221.
@@ -108,53 +110,32 @@ Set `path` in `greenhouse-obb.yaml` to the local dataset directory.
 
 ## Training
 
-The training script defaults to 512 x 512 input, AdamW, 300 maximum epochs, early-stopping patience of 60, and random seed 42.
+Training defaults are set in `fdpg/modes.yaml`: 260 epochs, batch size 16, and 512 x 512 input.
 
 ```bash
-python train.py \
-  --data greenhouse-obb.yaml \
-  --device 0 \
-  --batch 32 \
-  --epochs 300
+python -m fdpg train --mode nms --data greenhouse-obb.yaml --device 0
+python -m fdpg train --mode nms-free --data greenhouse-obb.yaml --device 0
 ```
 
-Training outputs are written to `runs/train/` and are ignored by Git.
+Outputs are saved under `runs/fdpg_switch/nms/` or `runs/fdpg_switch/nms-free/`.
 
 ## Validation
 
 Weights are not included. Supply a locally trained or separately downloaded checkpoint:
 
 ```bash
-python test.py \
-  --weights /path/to/best.pt \
-  --data greenhouse-obb.yaml \
-  --split test \
-  --device 0
+python -m fdpg val --mode nms --weights /path/to/fdpg.pt --data greenhouse-obb.yaml --device 0
+python -m fdpg val --mode nms-free --weights /path/to/fdpg-ipc.pt --data greenhouse-obb.yaml --device 0
 ```
 
 ## Prediction
 
 ```bash
-python predict.py \
-  --weights /path/to/best.pt \
-  --source /path/to/images \
-  --conf 0.40 \
-  --iou 0.60 \
-  --device 0 \
-  --save-txt
+python -m fdpg predict --mode nms --weights /path/to/fdpg.pt --source /path/to/images --conf 0.5 --device 0 --save-txt
+python -m fdpg predict --mode nms-free --weights /path/to/fdpg-ipc.pt --source /path/to/images --conf 0.5 --device 0 --save-txt
 ```
 
-Predicted oriented boxes and optional text labels are written to `runs/predict/`.
-
-## Mode selection
-
-```bash
-python -m fdpg train --mode nms-free --data greenhouse-obb.yaml --device 0
-python -m fdpg val --mode nms-free --weights /path/to/fdpg-ipc.pt --data greenhouse-obb.yaml --device 0
-python -m fdpg predict --mode nms-free --weights /path/to/fdpg-ipc.pt --source /path/to/images --device 0
-```
-
-Use `--mode nms` for standard FDPG. Use weights trained in the selected mode.
+Prediction uses a confidence threshold of 0.5 above; validation defaults to 0.01 for AP calculation.
 
 ## Acknowledgements
 
